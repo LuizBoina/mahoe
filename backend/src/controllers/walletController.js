@@ -1,3 +1,4 @@
+const PurchaseHistory = require('../models/PurchaseHistory');
 const Wallet = require('../models/Wallet');
 
 exports.createUserWallet = async () => {
@@ -9,33 +10,47 @@ exports.createUserWallet = async () => {
   }
 }
 
+const createPurchaseHistory = async (purchaseHistory) => {
+  try {
+    return await PurchaseHistory.create(purchaseHistory);
+  } catch (error) {
+    console.log(error)
+  }
+}
+
 exports.buyCrypto = async (req, res) => {
   try {
     const { id } = req.params;
     const { code: cryptoCode, amount, price: purchasePrice } = req.body;
+    const coinQtd = amount / purchasePrice;
+    const ph = {
+      purchasePrice,
+      cryptoCode,
+      amount: coinQtd,
+      isBuy: true,
+    };
     const wallet = await Wallet.findById(id, '-__v')
       .then(async doc => {
-        const idx = doc.ownedCryptos.findIndex((crypto) => crypto.code === cryptoCode);
-        console.log("crypto", idx)
+        const idx = doc.ownedCryptos.findIndex((crypto) => crypto.cryptoCode === cryptoCode);
+        const _ph = await createPurchaseHistory(ph);
+        doc.purchaseHistory.push(_ph);
         // new Crypto
         if (idx === -1) {
           doc.ownedCryptos.push({
             cryptoCode,
-            amount,
+            amount: coinQtd,
             purchasePrice
           });
+          doc.moneyAmount -= Number(amount);
           const updated = await doc.save();
-          console.log(doc, updated)
-          return res
-            .code(200)
-            .send(updated)
+          return updated
         }
         // already have crypto
         doc.ownedCryptos[idx]["purchasePrice"] = purchasePrice;
         doc.ownedCryptos[idx]["purchaseTime"] = Date.now();
-        doc.ownedCryptos[idx]["amount"] += amount
+        doc.ownedCryptos[idx]["amount"] += coinQtd;
+        doc.moneyAmount -= Number(amount);
         const updated = await doc.save();
-        console.log(doc, updated)
         return updated
       });
     return res
@@ -49,7 +64,37 @@ exports.buyCrypto = async (req, res) => {
   }
 }
 
-exports.sellCrypto = async () => {
+exports.sellCrypto = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { code: cryptoCode, amount, price: purchasePrice } = req.body;
+    const ph = {
+      purchasePrice,
+      cryptoCode,
+      amount,
+      isBuy: false,
+    };
+    const wallet = await Wallet.findById(id, '-__v')
+      .then(async doc => {
+        const idx = doc.ownedCryptos.findIndex((crypto) => crypto.cryptoCode === cryptoCode);
+        const _ph = await createPurchaseHistory(ph);
+        doc.purchaseHistory.push(_ph);
+        doc.ownedCryptos[idx]["purchasePrice"] = purchasePrice;
+        doc.ownedCryptos[idx]["purchaseTime"] = Date.now();
+        doc.ownedCryptos[idx]["amount"] -= amount;
+        doc.moneyAmount += amount * purchasePrice;
+        const updated = await doc.save();
+        return updated;
+      });
+    return res
+      .code(200)
+      .send(wallet);
+  } catch (error) {
+    console.log(error);
+    return res
+      .code(500)
+      .send(error);
+  }
 }
 
 exports.getWalletInfo = async (req, res) => {

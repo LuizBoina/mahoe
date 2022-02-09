@@ -4,7 +4,7 @@ import { FaSearch } from 'react-icons/fa';
 import { useTitle } from 'hookrouter';
 import './index.css';
 import { getWalletId } from "../../hooks/auth";
-import { buyCrypto, getCryptoInfo, getCryptoPrice, getWalletInfo } from "../../services/CryptoService";
+import { buyCrypto, getCryptoInfo, getCryptoPrice, getWalletInfo, sellCrypto } from "../../services/CryptoService";
 import Modal from "../../components/modal";
 
 const Wallet = () => {
@@ -14,6 +14,10 @@ const Wallet = () => {
     style: 'currency',
     currency: 'BRL',
   });
+
+  const formatDate = (dateStr) => (new Date(dateStr))
+    .toLocaleString('pt-BR').split(" ").reverse().join(" ");
+
   const initialCoin = {
     name: "",
     priceUnit: 0.0,
@@ -28,6 +32,10 @@ const Wallet = () => {
   const [wallet, setWallet] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setMessage] = useState("");
+  const [isSelling, setIsSelling] = useState(false);
+
+  const [purchaseCoins, setPurchaseCoins] = useState({});
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
     loadUserWallet();
@@ -37,6 +45,12 @@ const Wallet = () => {
     try {
       const { data: response } = await getWalletInfo(walletId);
       const { moneyAmount, purchaseHistory, ownedCryptos, ..._ } = response;
+      const coinsName = ownedCryptos.map(oc => oc.cryptoCode).join(",");
+      const coinsPrice = await getCryptoPrice(coinsName);
+      setPurchaseCoins(coinsPrice);
+      ownedCryptos.forEach(oc => oc.currentPrice = coinsPrice.find(c => c.name === oc.cryptoCode).price);
+      const total = moneyAmount + ownedCryptos.reduce((a, b) => a + b.amount * b.currentPrice, 0);
+      setTotal(total);
       setWallet({ moneyAmount, purchaseHistory, ownedCryptos });
       setIsLoading(false);
     } catch (error) {
@@ -56,13 +70,13 @@ const Wallet = () => {
       setIsLoading(true);
       const name = coinName.toLocaleUpperCase();
       const price = await getCryptoPrice(name);
-      if (!price) {
+      if (!price.length) {
         throw new Error();
       }
       setCoin({
         ...initialCoin,
         name: name,
-        priceUnit: price,
+        priceUnit: price[0].price,
       });
       setIsLoading(false);
       setShowModal(true);
@@ -71,6 +85,37 @@ const Wallet = () => {
       console.log(error);
       setMessage("Erro ao procurar moeda/ Moeda inexistente");
       setShowModal(true);
+    }
+  }
+
+  const openSellCryptoModal = async (crypto) => {
+    setIsSelling(true);
+    console.log(console.log(crypto))
+    setCoin({
+      ...crypto,
+      sell: 0.0,
+      receive: 0.0
+    });
+    setShowModal(true);
+  }
+
+  const handleSellCrypto = async () => {
+    if (coin.sell > coin.amount) {
+      setMessage("Saldo Indisponível");
+      return;
+    }
+    try {
+      const payload = {
+        code: coin.cryptoCode,
+        price: coin.currentPrice,
+        amount: coin.sell,
+      }
+      await sellCrypto(walletId, payload);
+      await loadUserWallet();
+      setMessage("Moeda Vendida Com Sucesso");
+    } catch (error) {
+      console.log(error)
+      closeModal(`Erro: ${error.response.data}`);
     }
   }
 
@@ -85,8 +130,8 @@ const Wallet = () => {
         amount: coin.buy,
         price: coin.priceUnit
       };
-      const { data: response } = await buyCrypto(walletId, payload);
-      console.log(response)
+      await buyCrypto(walletId, payload);
+      await loadUserWallet();
       setMessage("Moeda Comprada Com Sucesso")
     } catch (error) {
       console.log(error)
@@ -98,6 +143,7 @@ const Wallet = () => {
     setMessage("");
     setCoin(initialCoin);
     setIsLoading(false);
+    setIsSelling(false);
     setShowModal(false);
   }
 
@@ -108,24 +154,44 @@ const Wallet = () => {
       >
         <h2>{errorMessage}</h2>
       </Modal> :
-      <Modal
-        onCancel={closeModal}
-        onConfirm={handleBuyCrypto}
-      >
-        <h3>Comprar Moeda</h3><br />
-        <div>
-          <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Código: </h4>{coin.name}</div>
-          <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Preço Unidade: </h4>{currencyFormatter.format(coin.priceUnit)}</div>
-          <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Receber em Moeda: </h4>{coin.receive}</div>
-          <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Saldo Disponível: </h4>{currencyFormatter.format(wallet.moneyAmount)}</div>
+      isSelling ?
+        <Modal
+          onCancel={closeModal}
+          onConfirm={handleSellCrypto}
+        >
+          <h3>Vender Moeda</h3><br />
           <div>
-            <h4 style={{ display: 'inline', marginBottom: 12 }}>Pagar em Real:</h4>
-            <input style={{ marginLeft: 10, height: 22, width: 80 }} type="number" value={coin.buy}
-              onChange={(e) => setCoin({ ...coin, buy: e.target.value, receive: e.target.value / coin.priceUnit })}>
-            </input>
+            <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Código: </h4>{coin.cryptoCode}</div>
+            <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Preço Unidade: </h4>{currencyFormatter.format(coin.currentPrice)}</div>
+            <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Receber em Moeda: </h4>{currencyFormatter.format(coin.receive)}</div>
+            <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Saldo Disponível: </h4>{coin.amount}</div>
+            <div>
+              <h4 style={{ display: 'inline', marginBottom: 12 }}>Vender em Modea:</h4>
+              <input style={{ marginLeft: 10, height: 22, width: 80 }} type="number" value={coin.sell}
+                onChange={(e) => setCoin({ ...coin, sell: e.target.value, receive: e.target.value * coin.currentPrice })}>
+              </input>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+        :
+        <Modal
+          onCancel={closeModal}
+          onConfirm={handleBuyCrypto}
+        >
+          <h3>Comprar Moeda</h3><br />
+          <div>
+            <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Código: </h4>{coin.name}</div>
+            <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Preço Unidade: </h4>{currencyFormatter.format(coin.priceUnit)}</div>
+            <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Receber em Moeda: </h4>{coin.receive}</div>
+            <div style={{ marginBottom: 12 }}><h4 style={{ display: 'inline', marginBottom: 12 }}>Saldo Disponível: </h4>{currencyFormatter.format(wallet.moneyAmount)}</div>
+            <div>
+              <h4 style={{ display: 'inline', marginBottom: 12 }}>Pagar em Real:</h4>
+              <input style={{ marginLeft: 10, height: 22, width: 80 }} type="number" value={coin.buy}
+                onChange={(e) => setCoin({ ...coin, buy: e.target.value, receive: e.target.value / coin.priceUnit })}>
+              </input>
+            </div>
+          </div>
+        </Modal>
     ;
 
   return (
@@ -145,7 +211,7 @@ const Wallet = () => {
           <h5 style={{ display: 'inline', fontSize: '1em' }}>
             Total Na Carteira:
           </h5>
-          {currencyFormatter.format(wallet.moneyAmount)}
+          {currencyFormatter.format(total)}
           <br />
           <br />
           <h5 style={{ display: 'inline', fontSize: '1em', marginRight: 19 }}>
@@ -175,12 +241,20 @@ const Wallet = () => {
             </tr>
           </thead>
           <tbody>
-            {wallet && wallet.ownedCryptos.map((crypto, idx) => (
-              <tr key={`crypto-${idx}`}>
+            {wallet?.ownedCryptos?.map((crypto, idx) => (
+              <tr className='row-item' key={`crypto-${idx}`}>
                 <td>{crypto.cryptoCode}</td>
                 <td>{crypto.amount}</td>
-                <td>{crypto.purchasePrice}</td>
-                <td>{crypto.purchaseTime}</td>
+                <td>{currencyFormatter.format(crypto.purchasePrice)}</td>
+                <td>{currencyFormatter.format(crypto.currentPrice)}</td>
+                <td>{formatDate(crypto.purchaseTime)}</td>
+                <td>
+                  <button style={{ height: 24 }} className="btn del-item-btn"
+                    onClick={() => openSellCryptoModal(crypto)}
+                  >
+                    Vender
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -198,13 +272,13 @@ const Wallet = () => {
             </tr>
           </thead>
           <tbody>
-            {wallet && wallet.purchaseHistory.map((ph, idx) => (
-              <tr key={`ph-${idx}`}>
+            {wallet?.purchaseHistory?.map((ph, idx) => (
+              <tr className='row-item' key={`ph-${idx}`}>
                 <td>{ph.cryptoCode}</td>
                 <td>{ph.amount}</td>
-                <td>{ph.purchasePrice}</td>
+                <td>{currencyFormatter.format(ph.purchasePrice)}</td>
                 <td>{ph.isBuy ? 'Compra' : 'Venda'}</td>
-                <td>{ph.createdAt}</td>
+                <td>{formatDate(ph.createdAt)}</td>
               </tr>
             ))}
           </tbody>

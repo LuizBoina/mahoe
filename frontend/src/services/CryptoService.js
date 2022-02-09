@@ -6,8 +6,24 @@ const defaultCoins = "BTC,ETH,XRP,EOS,LTC,ADA,MIOTA";
 
 export const getCryptoPrice = async (coinName) => {
   try {
+    if (coinName.includes(",")) {
+      const { data: pricesResp } = await axios.get(`${API_URL}/pricemultifull?fsyms=${coinName}&tsyms=BRL`);
+      return Object.keys(pricesResp.RAW)
+        .map(i => {
+          return { name: i, ...pricesResp.RAW[i] }
+        })
+        .map(data => {
+          return {
+            name: data.name,
+            price: data.BRL.PRICE
+          }
+        })
+    }
     const response = await axios.get(`${API_URL}/price?fsym=${coinName}&tsyms=BRL`);
-    return response.data.BRL;
+    return [{
+      name: coinName,
+      price: response.data.BRL
+    }];
   } catch (error) {
     console.log(error);
   }
@@ -50,10 +66,10 @@ export const getWalletInfo = async (id) => {
   return await GenericService(`/wallet/${id}`, "GET");
 }
 
-export const buyCrypto = async (userId, body) => {
-  return await GenericService(`/user/${userId}/buy-crypto`, "POST", body);
+export const buyCrypto = async (walletId, body) => {
+  return await GenericService(`/user/${walletId}/buy-crypto`, "POST", body);
 }
 
-export const sellCrypto = async (userId, body) => {
-  return await GenericService(`/user/${userId}/sell-crypto`, "POST", body);
+export const sellCrypto = async (walletId, body) => {
+  return await GenericService(`/user/${walletId}/sell-crypto`, "POST", body);
 }
